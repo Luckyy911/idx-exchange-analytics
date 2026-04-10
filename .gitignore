@@ -1,3 +1,9 @@
+# === MLS Data (CONFIDENTIAL - DO NOT COMMIT) ===
+data/*.csv
+data/*.xlsx
+data/*.json
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
