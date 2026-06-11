@@ -105,6 +105,13 @@ print(f"Row count BEFORE PropertyType filter       : {rows_before_filter:,}")
 print(f"Row count AFTER  filtering to Residential  : {rows_after_filter:,}")
 print(f"Rows removed (non-residential)             : {rows_before_filter - rows_after_filter:,}")
 
+# PropertyType frequency table AFTER filter.
+# This is the filter check validation layer: confirms only 'Residential' remains
+# and the count matches the row count above.
+print("\nPropertyType distribution AFTER filter:")
+print(df_sold['PropertyType'].value_counts(dropna=False).to_string())
+print()
+
 # Save the combined, unmodified Residential dataset.
 # This is the Week 1 checkpoint — raw data, no cleaning yet.
 # index=False prevents writing a useless "0, 1, 2..." column into the CSV.

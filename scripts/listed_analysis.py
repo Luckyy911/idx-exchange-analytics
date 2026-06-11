@@ -110,6 +110,11 @@ print(f"Row count BEFORE PropertyType filter       : {rows_before_filter:,}")
 print(f"Row count AFTER  filtering to Residential  : {rows_after_filter:,}")
 print(f"Rows removed (non-residential)             : {rows_before_filter - rows_after_filter:,}")
 
+# PropertyType frequency table AFTER filter — filter check validation layer
+print("\nPropertyType distribution AFTER filter:")
+print(df_listed['PropertyType'].value_counts(dropna=False).to_string())
+print()
+
 # Save the combined, unmodified Residential listing dataset
 df_listed.to_csv("data/listed_combined.csv", index=False)
 print(f"\n[OK] Saved: data/listed_combined.csv  ({len(df_listed):,} rows × {df_listed.shape[1]} columns)")
