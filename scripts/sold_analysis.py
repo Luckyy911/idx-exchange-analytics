@@ -447,7 +447,7 @@ for col in date_cols:
 print("\n-- Step 2: Drop non-analytical columns --")
 cols_to_drop = [
     # Agent personal info
-    'ListAgentEmail', 'ListAgentFirstName', 'ListAgentLastName', 'ListAgentFullName',
+    'ListAgentEmail', 'ListAgentFirstName', 'ListAgentLastName',
     'CoListAgentFirstName', 'CoListAgentLastName',
     'BuyerAgentFirstName', 'BuyerAgentLastName', 'CoBuyerAgentFirstName',
     # AOR (broker association codes — internal routing)
@@ -616,6 +616,21 @@ if 'Latitude' in df_sold.columns and 'Longitude' in df_sold.columns:
     n = df_sold['out_of_state_flag'].sum()
     print(f"  out_of_state_flag (CA bounds): {n:,} records")
 
+# non_ca_postal_flag: California ZIP codes run 90001–96162.
+# Any code outside that band is registered to a different state.
+# We strip ZIP+4 suffixes (e.g. "90210-1234" → "90210") before converting
+# so the check works regardless of how the source data was formatted.
+if 'PostalCode' in df_sold.columns:
+    zip5 = (
+        df_sold['PostalCode']
+        .astype(str)
+        .str.extract(r'^(\d{5})', expand=False)
+    )
+    zip_num = pd.to_numeric(zip5, errors='coerce')
+    df_sold['non_ca_postal_flag'] = zip_num.notna() & ~zip_num.between(90001, 96162)
+    n = df_sold['non_ca_postal_flag'].sum()
+    print(f"  non_ca_postal_flag (ZIP 90001-96162): {n:,} records")
+
 print(f"\nRow count after cleaning: {len(df_sold):,}  (started: {rows_before_cleaning:,}, removed: {rows_before_cleaning - len(df_sold):,})")
 
 df_sold.to_csv("data/sold_cleaned.csv", index=False)
@@ -637,11 +652,17 @@ print("=" * 70)
 # np.where(condition, value_if_true, value_if_false) avoids division-by-zero errors
 # by returning NaN whenever OriginalListPrice is 0 or negative.
 if 'ClosePrice' in df_sold.columns and 'OriginalListPrice' in df_sold.columns:
-    df_sold['price_ratio'] = np.where(
-        df_sold['OriginalListPrice'] > 0,
+    # Guard requires OriginalListPrice > 1000 — values at or below that are
+    # almost certainly data entry errors and produce nonsensical ratios (e.g. 150x).
+    raw_ratio = np.where(
+        df_sold['OriginalListPrice'] > 1000,
         (df_sold['ClosePrice'] / df_sold['OriginalListPrice']).round(4),
         np.nan
     )
+    # Clip to [0.5, 1.5]: anything outside that window is not a realistic sale
+    # (no real buyer pays 150 % of list, and 50 % off original list is already
+    # extreme). pandas.Series.clip preserves NaN values.
+    df_sold['price_ratio'] = pd.Series(raw_ratio, index=df_sold.index).clip(lower=0.5, upper=1.5)
     print(f"  price_ratio (ClosePrice / OriginalListPrice)  : computed")
 
 # ── Price Per Square Foot (ClosePrice / LivingArea) ──────────────────────────
@@ -799,6 +820,40 @@ for field in outlier_fields:
         med_after  = df_final[field].median()
         shift = med_after - med_before
         print(f"  {field:20s}: {med_before:>12,.2f} -> {med_after:>12,.2f}  (shift: {shift:+,.2f})")
+
+# ── Geography filter: keep CA records only ───────────────────────────────────
+# Accept a row if StateOrProvince is 'CA' OR if its coordinates fall within
+# California's bounding box (lat 32–42, lng -124 to -114). Using OR means a
+# record with a valid CA state code but missing coords is still kept, and vice
+# versa for records where the state field is blank but the pin is in-state.
+rows_before_geo = len(df_final)
+
+state_col = df_final.get('StateOrProvince', pd.Series(dtype=str))
+in_state  = state_col == 'CA'
+# Bbox is a fallback only for rows whose state field is missing/blank.
+# Rows with an explicit non-CA code (AZ, NV, etc.) are dropped even if their
+# coordinates happen to fall inside California's bounding box.
+state_missing = state_col.isna() | (state_col.str.strip() == '')
+lat_col   = df_final.get('Latitude',  pd.Series(dtype=float))
+lng_col   = df_final.get('Longitude', pd.Series(dtype=float))
+in_bbox   = state_missing & lat_col.between(32, 42) & lng_col.between(-124, -114)
+
+df_final = df_final[in_state | in_bbox].copy()
+
+# Drop records whose PostalCode is present but falls outside California (90001–96162).
+# This catches cases where the state/coord filter passed the row but the ZIP is
+# clearly wrong (e.g., a Nevada or Arizona code entered for a CA listing).
+if 'PostalCode' in df_final.columns:
+    zip5    = df_final['PostalCode'].astype(str).str.extract(r'^(\d{5})', expand=False)
+    zip_num = pd.to_numeric(zip5, errors='coerce')
+    non_ca  = zip_num.notna() & ~zip_num.between(90001, 96162)
+    df_final = df_final[~non_ca].copy()
+
+rows_removed_geo = rows_before_geo - len(df_final)
+print(f"\nGeography filter (CA only):")
+print(f"  Rows before : {rows_before_geo:,}")
+print(f"  Rows removed: {rows_removed_geo:,}")
+print(f"  Rows kept   : {len(df_final):,}")
 
 df_final.to_csv("data/sold_final.csv", index=False)
 print(f"\n[OK] Saved: data/sold_final.csv  ({len(df_final):,} rows × {df_final.shape[1]} columns)")
